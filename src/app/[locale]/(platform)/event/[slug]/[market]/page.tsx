@@ -1,11 +1,10 @@
-'use cache'
-
 import type { Metadata } from 'next'
 import type { SupportedLocale } from '@/i18n/locales'
 import { setRequestLocale } from 'next-intl/server'
 import { notFound } from 'next/navigation'
+import { Suspense } from 'react'
 import EventContent from '@/app/[locale]/(platform)/event/[slug]/_components/EventContent'
-import EventViewerState from '@/app/[locale]/(platform)/event/[slug]/_components/EventViewerState'
+import EventViewerStateBoundary from '@/app/[locale]/(platform)/event/[slug]/_components/EventViewerStateBoundary'
 import EventStructuredData from '@/components/seo/EventStructuredData'
 import { redirect } from '@/i18n/navigation'
 import { buildEventPageMetadata } from '@/lib/event-open-graph'
@@ -32,13 +31,16 @@ export async function generateMetadata({ params }: PageProps<'/[locale]/event/[s
   })
 }
 
-export default async function EventMarketPage({ params }: PageProps<'/[locale]/event/[slug]/[market]'>) {
-  const { locale, slug, market } = await params
-  setRequestLocale(locale)
-  const resolvedLocale = locale as SupportedLocale
-  if (slug === STATIC_PARAMS_PLACEHOLDER || market === STATIC_PARAMS_PLACEHOLDER) {
-    notFound()
-  }
+async function CachedEventMarketPageContent({
+  locale,
+  slug,
+  market,
+}: {
+  locale: SupportedLocale
+  slug: string
+  market: string
+}) {
+  'use cache'
 
   const eventRoute = await getEventRouteBySlug(slug)
   if (!eventRoute) {
@@ -50,12 +52,12 @@ export default async function EventMarketPage({ params }: PageProps<'/[locale]/e
   if (canonicalPath !== legacyPath) {
     redirect({
       href: canonicalPath,
-      locale: resolvedLocale,
+      locale,
     })
   }
 
   const [eventPageData, runtimeTheme] = await Promise.all([
-    loadEventPagePublicContentData(slug, resolvedLocale),
+    loadEventPagePublicContentData(slug, locale),
     loadRuntimeThemeState(),
   ])
   if (!eventPageData) {
@@ -66,7 +68,7 @@ export default async function EventMarketPage({ params }: PageProps<'/[locale]/e
     <>
       <EventStructuredData
         event={eventPageData.event}
-        locale={resolvedLocale}
+        locale={locale}
         pagePath={resolveEventMarketPath(eventPageData.event, market)}
         marketSlug={market}
         site={runtimeTheme.site}
@@ -81,7 +83,24 @@ export default async function EventMarketPage({ params }: PageProps<'/[locale]/e
         liveChartConfig={eventPageData.liveChartConfig}
         key={`is-bookmarked-${eventPageData.event.is_bookmarked}`}
       />
-      <EventViewerState />
+    </>
+  )
+}
+
+export default async function EventMarketPage({ params }: PageProps<'/[locale]/event/[slug]/[market]'>) {
+  const { locale, slug, market } = await params
+  setRequestLocale(locale)
+  const resolvedLocale = locale as SupportedLocale
+  if (slug === STATIC_PARAMS_PLACEHOLDER || market === STATIC_PARAMS_PLACEHOLDER) {
+    notFound()
+  }
+
+  return (
+    <>
+      <CachedEventMarketPageContent locale={resolvedLocale} slug={slug} market={market} />
+      <Suspense fallback={null}>
+        <EventViewerStateBoundary />
+      </Suspense>
     </>
   )
 }
