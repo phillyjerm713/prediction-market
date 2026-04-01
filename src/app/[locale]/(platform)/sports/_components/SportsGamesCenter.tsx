@@ -85,6 +85,7 @@ import {
   formatVolume,
   fromMicro,
 } from '@/lib/formatters'
+import { resolveOutcomePriceCents, resolveOutcomeSelectionPriceCents } from '@/lib/market-pricing'
 import { formatOddsFromCents, ODDS_FORMAT_OPTIONS } from '@/lib/odds-format'
 import { calculateMarketFill, normalizeBookLevels } from '@/lib/order-panel-utils'
 import { calculateYAxisBounds } from '@/lib/prediction-chart'
@@ -403,16 +404,6 @@ function normalizeHexColor(value: string | null | undefined) {
   return /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(withHash) ? withHash : null
 }
 
-function normalizeMarketPriceCents(market: Market) {
-  const value = Number.isFinite(market.price)
-    ? market.price * 100
-    : Number.isFinite(market.probability)
-      ? market.probability
-      : 0
-
-  return Math.max(0, Math.min(100, Math.round(value)))
-}
-
 export function resolveButtonStyle(
   color: string | null,
   tone?: SportsGamesButton['tone'],
@@ -476,13 +467,11 @@ export function resolveButtonOverlayStyle(
 }
 
 function normalizeOutcomePriceCents(outcome: Outcome | null | undefined, market: Market) {
-  if (outcome && Number.isFinite(outcome.buy_price)) {
-    const value = Number(outcome.buy_price) * 100
-    return Math.max(0, Math.min(100, Math.round(value)))
-  }
+  const outcomeIndex = outcome?.outcome_index === OUTCOME_INDEX.NO
+    ? OUTCOME_INDEX.NO
+    : OUTCOME_INDEX.YES
 
-  const yesPrice = normalizeMarketPriceCents(market)
-  return outcome?.outcome_index === OUTCOME_INDEX.NO ? Math.max(0, 100 - yesPrice) : yesPrice
+  return resolveOutcomePriceCents(market, outcomeIndex) ?? 50
 }
 
 export function groupButtonsByMarketType(buttons: SportsGamesButton[]) {
@@ -3867,6 +3856,59 @@ export default function SportsGamesCenter({
       return searchableText.includes(normalizedSearchQuery)
     })
   }, [normalizedSearchQuery, resolveCardCategory, weekFilteredCards])
+  const buttonTokenIds = useMemo(() => {
+    const tokenIds = new Set<string>()
+
+    filteredCards.forEach((card) => {
+      const marketsByConditionId = new Map(
+        card.detailMarkets.map(market => [market.condition_id, market] as const),
+      )
+
+      card.buttons.forEach((button) => {
+        const market = marketsByConditionId.get(button.conditionId)
+        const outcome = market?.outcomes.find(currentOutcome => currentOutcome.outcome_index === button.outcomeIndex)
+          ?? market?.outcomes[button.outcomeIndex]
+
+        if (outcome?.token_id) {
+          tokenIds.add(String(outcome.token_id))
+        }
+      })
+    })
+
+    return Array.from(tokenIds)
+  }, [filteredCards])
+  const { data: buttonOrderBookSummaries } = useOrderBookSummaries(buttonTokenIds)
+  const buttonPriceCentsByKey = useMemo(() => {
+    const priceByKey = new Map<string, number>()
+
+    filteredCards.forEach((card) => {
+      const marketsByConditionId = new Map(
+        card.detailMarkets.map(market => [market.condition_id, market] as const),
+      )
+
+      card.buttons.forEach((button) => {
+        const market = marketsByConditionId.get(button.conditionId) ?? null
+        const outcome = market?.outcomes.find(currentOutcome => currentOutcome.outcome_index === button.outcomeIndex)
+          ?? market?.outcomes[button.outcomeIndex]
+        const cents = resolveOutcomePriceCents(
+          market,
+          button.outcomeIndex === OUTCOME_INDEX.NO ? OUTCOME_INDEX.NO : OUTCOME_INDEX.YES,
+          {
+            orderBookSummaries: buttonOrderBookSummaries,
+            side: ORDER_SIDE.BUY,
+          },
+        )
+        const selectionCents = resolveOutcomeSelectionPriceCents(market, outcome, {
+          orderBookSummaries: buttonOrderBookSummaries,
+          side: ORDER_SIDE.BUY,
+          fallbackIsNoOutcome: button.fallbackIsNoOutcome,
+        })
+        priceByKey.set(`${card.id}:${button.key}`, selectionCents ?? cents ?? button.cents)
+      })
+    })
+
+    return priceByKey
+  }, [buttonOrderBookSummaries, filteredCards])
 
   const emptyStateLabel = normalizedSearchQuery
     ? 'No games found for this search.'
@@ -4822,7 +4864,7 @@ export default function SportsGamesCenter({
                                 {button.label}
                               </span>
                               <span className="relative z-1 text-sm leading-none tabular-nums">
-                                {formatButtonOdds(button.cents)}
+                                {formatButtonOdds(buttonPriceCentsByKey.get(`${card.id}:${button.key}`) ?? button.cents)}
                               </span>
                             </button>
                           </div>
