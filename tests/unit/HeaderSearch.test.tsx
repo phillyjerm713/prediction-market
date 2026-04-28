@@ -132,4 +132,37 @@ describe('headerSearch', () => {
     expect(mocks.clearSearch).not.toHaveBeenCalled()
     expect(screen.queryByTestId('search-results')).not.toBeInTheDocument()
   })
+
+  it('keeps the attached dropdown open when escape is pressed during composition', () => {
+    mocks.useSearch.mockReturnValue({
+      activeTab: 'events',
+      clearSearch: mocks.clearSearch,
+      handleQueryChange: mocks.handleQueryChange,
+      hideResults: mocks.hideResults,
+      isLoading: {
+        events: false,
+        profiles: false,
+      },
+      query: 'brazil',
+      results: {
+        events: [],
+        profiles: [],
+      },
+      setActiveTab: mocks.setActiveTab,
+      showResults: true,
+      showSearchResults: mocks.showSearchResults,
+    })
+
+    render(<HeaderSearch />)
+
+    expect(screen.getByTestId('search-results')).toBeInTheDocument()
+
+    fireEvent.keyDown(screen.getByTestId('header-search-input'), {
+      key: 'Escape',
+      isComposing: true,
+    })
+
+    expect(mocks.hideResults).not.toHaveBeenCalled()
+    expect(screen.getByTestId('search-results')).toBeInTheDocument()
+  })
 })

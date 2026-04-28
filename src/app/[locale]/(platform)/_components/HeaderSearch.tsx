@@ -244,7 +244,7 @@ export default function HeaderSearch({
   }, [blurFrameRef])
 
   function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key !== 'Escape' || !showAttachedDropdown) {
+    if (event.key !== 'Escape' || event.nativeEvent.isComposing || !showAttachedDropdown) {
       return
     }
 
