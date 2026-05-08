@@ -32,7 +32,7 @@ export async function updateEventSportsFinalStateAction(
   },
 ): Promise<UpdateEventSportsFinalStateResult> {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return {
         success: false,

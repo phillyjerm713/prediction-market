@@ -46,7 +46,7 @@ export async function updateForkSettingsAction(
   _prevState: ForkSettingsActionState,
   formData: FormData,
 ): Promise<ForkSettingsActionState> {
-  const user = await UserRepository.getCurrentUser()
+  const user = await UserRepository.getCurrentUser({ minimal: true })
   if (!user || !user.is_admin) {
     return { error: 'Unauthenticated.' }
   }

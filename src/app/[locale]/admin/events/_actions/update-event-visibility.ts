@@ -21,7 +21,7 @@ export async function updateEventVisibilityAction(
   isHidden: boolean,
 ): Promise<UpdateEventVisibilityResult> {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return {
         success: false,

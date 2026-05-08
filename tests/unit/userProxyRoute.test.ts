@@ -59,6 +59,7 @@ describe('user deposit wallet route', () => {
     expect(response.status).toBe(200)
     const body = await response.json()
     expect(body.deposit_wallet_status).toBe('deployed')
+    expect(body.deposit_wallet_tx_hash).toBeNull()
     expect(mocks.update).toHaveBeenCalled()
     expect(mocks.set).toHaveBeenCalledWith({ deposit_wallet_status: 'deployed', deposit_wallet_tx_hash: null })
   })

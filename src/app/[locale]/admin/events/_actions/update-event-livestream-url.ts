@@ -42,7 +42,7 @@ export async function updateEventLivestreamUrlAction(
   livestreamUrl: string,
 ): Promise<UpdateEventLivestreamUrlResult> {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return {
         success: false,

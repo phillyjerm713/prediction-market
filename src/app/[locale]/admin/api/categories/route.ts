@@ -17,7 +17,7 @@ const VALID_SORT_FIELDS: AdminCategoriesSortBy[] = [
 
 export async function GET(request: NextRequest) {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return NextResponse.json({ error: 'Unauthenticated.' }, { status: 401 })
     }

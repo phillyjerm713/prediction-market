@@ -69,7 +69,9 @@ export function useDepositWalletPolling({
             const nextSignature = data.deposit_wallet_signature ?? previous.deposit_wallet_signature
             const nextSignedAt = data.deposit_wallet_signed_at ?? previous.deposit_wallet_signed_at
             const nextStatus = (data.deposit_wallet_status as DepositWalletStatus | null | undefined) ?? previous.deposit_wallet_status
-            const nextTxHash = data.deposit_wallet_tx_hash ?? previous.deposit_wallet_tx_hash
+            const nextTxHash = data.deposit_wallet_tx_hash === undefined
+              ? previous.deposit_wallet_tx_hash
+              : data.deposit_wallet_tx_hash
 
             const nothingChanged = (
               nextAddress === previous.deposit_wallet_address

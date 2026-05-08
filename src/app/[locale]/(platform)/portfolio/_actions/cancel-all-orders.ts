@@ -29,7 +29,7 @@ function normalizeCancelResponse(payload: any) {
 }
 
 export async function cancelAllOrdersAction(): Promise<CancelAllOrdersResult> {
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
   if (!user) {
     return { cancelled: [], notCanceled: {}, error: 'Unauthenticated.' }
   }

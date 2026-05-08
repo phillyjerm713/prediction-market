@@ -47,7 +47,7 @@ export async function updateLocalesSettingsAction(
   formData: FormData,
 ): Promise<LocalesSettingsActionState> {
   const t = await getExtracted()
-  const user = await UserRepository.getCurrentUser()
+  const user = await UserRepository.getCurrentUser({ minimal: true })
 
   if (!user || !user.is_admin) {
     return { error: t('Unauthenticated.') }

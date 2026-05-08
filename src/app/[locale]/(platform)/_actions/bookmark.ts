@@ -6,7 +6,7 @@ import { UserRepository } from '@/lib/db/queries/user'
 
 export async function getBookmarkStatusAction(eventId: string) {
   try {
-    const user = await UserRepository.getCurrentUser()
+    const user = await UserRepository.getCurrentUser({ minimal: true })
     if (!user) {
       return { data: false, error: null }
     }
@@ -20,7 +20,7 @@ export async function getBookmarkStatusAction(eventId: string) {
 
 export async function toggleBookmarkAction(eventId: string) {
   try {
-    const user = await UserRepository.getCurrentUser()
+    const user = await UserRepository.getCurrentUser({ minimal: true })
     if (!user) {
       return { data: null, error: 'Unauthenticated.' }
     }

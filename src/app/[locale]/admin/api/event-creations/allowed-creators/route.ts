@@ -42,7 +42,7 @@ function toNormalizedWalletList(wallets: string[]) {
 }
 
 async function requireAdmin() {
-  const currentUser = await UserRepository.getCurrentUser()
+  const currentUser = await UserRepository.getCurrentUser({ minimal: true })
   return Boolean(currentUser?.is_admin)
 }
 

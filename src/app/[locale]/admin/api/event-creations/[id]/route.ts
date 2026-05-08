@@ -45,7 +45,7 @@ function hasOwnField<T extends object, K extends PropertyKey>(value: T, key: K):
 
 export async function PATCH(request: NextRequest, { params }: EventCreationDraftRouteProps) {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return NextResponse.json({ error: 'Unauthenticated.' }, { status: 401 })
     }
@@ -160,7 +160,7 @@ export async function PATCH(request: NextRequest, { params }: EventCreationDraft
 
 export async function DELETE(_request: NextRequest, { params }: EventCreationDraftRouteProps) {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return NextResponse.json({ error: 'Unauthenticated.' }, { status: 401 })
     }

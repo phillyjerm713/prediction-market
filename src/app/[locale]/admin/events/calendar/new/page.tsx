@@ -50,7 +50,7 @@ async function AdminCreateEventNewContent({
     ? buildAdminSportsSlugCatalog(sportsMenuResult.data)
     : EMPTY_ADMIN_SPORTS_SLUG_CATALOG
 
-  const currentUser = await UserRepository.getCurrentUser()
+  const currentUser = await UserRepository.getCurrentUser({ minimal: true })
   const draftResult = (draftId && currentUser?.is_admin)
     ? await EventCreationRepository.getDraftByIdForUser({
         draftId,

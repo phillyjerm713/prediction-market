@@ -169,7 +169,7 @@ export async function updateGeneralSettingsAction(
   _prevState: GeneralSettingsActionState,
   formData: FormData,
 ): Promise<GeneralSettingsActionState> {
-  const user = await UserRepository.getCurrentUser()
+  const user = await UserRepository.getCurrentUser({ minimal: true })
   if (!user || !user.is_admin) {
     return { error: 'Unauthenticated.' }
   }
@@ -407,7 +407,7 @@ export async function updateGeneralSettingsAction(
 }
 
 export async function removeTermsOfServicePdfAction(): Promise<GeneralSettingsActionState> {
-  const user = await UserRepository.getCurrentUser()
+  const user = await UserRepository.getCurrentUser({ minimal: true })
   if (!user || !user.is_admin) {
     return { error: 'Unauthenticated.' }
   }

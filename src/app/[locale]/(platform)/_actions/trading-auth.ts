@@ -70,7 +70,7 @@ async function requestApiKey(baseUrl: string, headers: Record<string, string>) {
 }
 
 export async function generateTradingAuthAction(input: z.input<typeof GenerateTradingAuthSchema>): Promise<TradingAuthActionResult> {
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
   if (!user) {
     return { error: 'Unauthenticated.', data: null }
   }

@@ -21,7 +21,7 @@ export default async function AccountSettingsPage({ params }: PageProps<'/[local
 
   const t = await getExtracted()
 
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
   if (!user) {
     notFound()
   }

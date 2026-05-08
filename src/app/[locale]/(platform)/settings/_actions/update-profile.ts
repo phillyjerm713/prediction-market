@@ -65,7 +65,7 @@ const UpdateUserSchema = z.object({
 
 export async function updateUserAction(formData: FormData): Promise<ActionState> {
   try {
-    const user = await UserRepository.getCurrentUser()
+    const user = await UserRepository.getCurrentUser({ minimal: true })
     if (!user) {
       return { error: 'Unauthenticated.' }
     }

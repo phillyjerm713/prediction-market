@@ -42,7 +42,7 @@ export async function updateMarketContextSettingsAction(
   _prevState: MarketContextSettingsActionState,
   formData: FormData,
 ): Promise<MarketContextSettingsActionState> {
-  const user = await UserRepository.getCurrentUser()
+  const user = await UserRepository.getCurrentUser({ minimal: true })
 
   if (!user || !user.is_admin) {
     return { error: 'Unauthenticated.' }

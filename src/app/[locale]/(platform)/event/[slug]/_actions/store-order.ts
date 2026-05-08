@@ -191,7 +191,7 @@ async function readClobResponsePayload(response: {
 }
 
 export async function storeOrderAction(payload: StoreOrderInput) {
-  const user = await UserRepository.getCurrentUser()
+  const user = await UserRepository.getCurrentUser({ minimal: true })
   if (!user) {
     return { error: 'Unauthenticated.' }
   }

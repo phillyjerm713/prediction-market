@@ -38,7 +38,7 @@ function revalidateCategoryCaches(userId: string) {
 
 export async function getMainCategoriesForOrderingAction(): Promise<MainCategoryOrderListResult> {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return {
         success: false,
@@ -79,7 +79,7 @@ export async function updateMainCategoriesDisplayOrderAction(categoryIds: number
       }
     }
 
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser || !currentUser.is_admin) {
       return {
         success: false,

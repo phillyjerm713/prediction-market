@@ -13,7 +13,7 @@ const CancelOrderSchema = z.object({
 const CANCEL_ORDER_ERROR = 'Unable to cancel this order right now. Please try again.'
 
 export async function cancelOrderAction(rawOrderId: string) {
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
   if (!user) {
     return { error: 'Unauthenticated.' }
   }

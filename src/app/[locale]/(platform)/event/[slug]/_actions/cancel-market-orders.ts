@@ -42,7 +42,7 @@ function normalizeCancelResponse(payload: any) {
 }
 
 export async function cancelMarketOrdersAction(payload: { market?: string, assetId?: string }): Promise<CancelMarketOrdersResult> {
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
   if (!user) {
     return { cancelled: [], notCanceled: {}, error: 'Unauthenticated.' }
   }

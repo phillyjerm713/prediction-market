@@ -39,7 +39,7 @@ interface ClobOpenOrder {
 
 export async function GET(request: Request) {
   try {
-    const user = await UserRepository.getCurrentUser()
+    const user = await UserRepository.getCurrentUser({ minimal: true })
     if (!user) {
       return NextResponse.json({ data: [], next_cursor: 'LTE=' })
     }

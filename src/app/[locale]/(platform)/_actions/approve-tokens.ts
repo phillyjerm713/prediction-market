@@ -249,7 +249,7 @@ export async function getDepositWalletNonceAction(): Promise<RelayerNonceResult>
 export async function submitDepositWalletTransactionAction(
   request: WalletTransactionRequestPayload,
 ): Promise<SubmitWalletTransactionResult> {
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
   if (!user) {
     return { error: 'Unauthenticated.' }
   }

@@ -20,7 +20,7 @@ export default async function NotificationsSettingsPage({ params }: PageProps<'/
 
   const t = await getExtracted()
 
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
   if (!user) {
     notFound()
   }

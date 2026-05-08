@@ -5,7 +5,7 @@ import { UserRepository } from '@/lib/db/queries/user'
 
 export async function GET() {
   try {
-    const user = await UserRepository.getCurrentUser()
+    const user = await UserRepository.getCurrentUser({ minimal: true })
 
     if (!user) {
       return NextResponse.json(

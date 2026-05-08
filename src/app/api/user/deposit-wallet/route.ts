@@ -6,7 +6,7 @@ import { isDepositWalletDeployed } from '@/lib/deposit-wallet'
 import { db } from '@/lib/drizzle'
 
 export async function GET() {
-  const user = await UserRepository.getCurrentUser({ disableCookieCache: true })
+  const user = await UserRepository.getCurrentUser({ disableCookieCache: true, minimal: true })
 
   if (!user) {
     return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
@@ -14,6 +14,7 @@ export async function GET() {
 
   const depositWalletAddress = user.deposit_wallet_address ?? null
   let depositWalletStatus = user.deposit_wallet_status ?? null
+  let depositWalletTxHash = user.deposit_wallet_tx_hash ?? null
 
   if (depositWalletAddress) {
     const deployed = await isDepositWalletDeployed(depositWalletAddress as `0x${string}`)
@@ -23,6 +24,7 @@ export async function GET() {
         .set({ deposit_wallet_status: 'deployed', deposit_wallet_tx_hash: null })
         .where(eq(users.id, user.id))
       depositWalletStatus = 'deployed'
+      depositWalletTxHash = null
     }
     else if (!deployed && depositWalletStatus === 'deployed') {
       await db
@@ -38,6 +40,6 @@ export async function GET() {
     deposit_wallet_signature: user.deposit_wallet_signature ?? null,
     deposit_wallet_signed_at: user.deposit_wallet_signed_at ?? null,
     deposit_wallet_status: depositWalletStatus,
-    deposit_wallet_tx_hash: user.deposit_wallet_tx_hash ?? null,
+    deposit_wallet_tx_hash: depositWalletTxHash,
   })
 }

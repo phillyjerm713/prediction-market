@@ -9,7 +9,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const user = await UserRepository.getCurrentUser()
+    const user = await UserRepository.getCurrentUser({ minimal: true })
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthenticated.' }, { status: 401 })

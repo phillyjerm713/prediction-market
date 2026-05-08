@@ -8,7 +8,7 @@ import { extractTwoFactorErrorMessage } from './two-factor-errors'
 
 export async function disableTwoFactorAction() {
   try {
-    const currentUser = await UserRepository.getCurrentUser()
+    const currentUser = await UserRepository.getCurrentUser({ minimal: true })
     if (!currentUser) {
       return { error: 'Unauthenticated.' }
     }
