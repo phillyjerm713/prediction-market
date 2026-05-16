@@ -1,5 +1,7 @@
+import { buildCommunityApiUrl } from '@/lib/community-url'
+
 const STORAGE_KEY = 'community_auth'
-const STORAGE_VERSION = 2
+const STORAGE_VERSION = 3
 
 interface StoredCommunityAuth {
   version?: number
@@ -20,6 +22,9 @@ interface AuthNonceResponse {
 interface AuthVerifyResponse {
   token: string
   expires_at: string
+  profile?: {
+    deposit_wallet_address?: string | null
+  }
 }
 
 function normalizeDepositWalletAddress(value?: string | null) {
@@ -30,7 +35,7 @@ function normalizeDepositWalletAddress(value?: string | null) {
   if (!trimmed) {
     return null
   }
-  return trimmed
+  return trimmed.toLowerCase()
 }
 
 function isExpired(expiresAt: string) {
@@ -104,14 +109,16 @@ export async function ensureCommunityToken({
   signMessageAsync,
   communityApiUrl = process.env.COMMUNITY_URL!,
   depositWalletAddress,
+  forceRefresh = false,
 }: {
   address: string
   signMessageAsync: SignMessageFn
   communityApiUrl?: string
   depositWalletAddress?: string | null
+  forceRefresh?: boolean
 }) {
   const normalizedDepositWallet = normalizeDepositWalletAddress(depositWalletAddress)
-  const existing = loadCommunityAuth(address)
+  const existing = forceRefresh ? null : loadCommunityAuth(address)
   if (existing?.token) {
     const storedDepositWallet = normalizeDepositWalletAddress(existing.deposit_wallet_address)
     if (!normalizedDepositWallet || storedDepositWallet === normalizedDepositWallet) {
@@ -119,7 +126,7 @@ export async function ensureCommunityToken({
     }
   }
 
-  const nonceResponse = await fetch(`${communityApiUrl}/auth/nonce`, {
+  const nonceResponse = await fetch(buildCommunityApiUrl(communityApiUrl, '/auth/nonce'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -134,7 +141,7 @@ export async function ensureCommunityToken({
   const noncePayload = await nonceResponse.json() as AuthNonceResponse
   const signature = await signMessageAsync({ message: noncePayload.message })
 
-  const verifyResponse = await fetch(`${communityApiUrl}/auth/verify`, {
+  const verifyResponse = await fetch(buildCommunityApiUrl(communityApiUrl, '/auth/verify'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -151,13 +158,17 @@ export async function ensureCommunityToken({
   }
 
   const verifyPayload = await verifyResponse.json() as AuthVerifyResponse
+  const profileDepositWallet = verifyPayload.profile && 'deposit_wallet_address' in verifyPayload.profile
+    ? normalizeDepositWalletAddress(verifyPayload.profile.deposit_wallet_address)
+    : undefined
+  const verifiedDepositWallet = profileDepositWallet ?? normalizedDepositWallet
 
   storeCommunityAuth({
     version: STORAGE_VERSION,
     token: verifyPayload.token,
     address,
     expires_at: verifyPayload.expires_at,
-    deposit_wallet_address: normalizedDepositWallet,
+    deposit_wallet_address: verifiedDepositWallet,
   })
 
   return verifyPayload.token
