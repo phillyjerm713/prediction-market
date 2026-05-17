@@ -30,7 +30,10 @@ import { buildPublicProfilePath } from '@/lib/platform-routing'
 import { isTradingAuthRequiredError } from '@/lib/trading-auth/errors'
 import { triggerConfetti } from '@/lib/utils'
 import { normalizeAddress } from '@/lib/wallet'
-import { signAndSubmitDepositWalletCalls } from '@/lib/wallet/client'
+import {
+  DepositWalletCallItemsSplitFallbackError,
+  signAndSubmitDepositWalletCallItemsWithSplitFallback,
+} from '@/lib/wallet/client'
 import {
   buildNegRiskRedeemPositionCall,
   buildRedeemPositionCall,
@@ -113,7 +116,35 @@ function useMarketsWonDialogState() {
 function useMarketsWonClaimState() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [hiddenClaimSignature, setHiddenClaimSignature] = useState<string | null>(null)
-  return { isSubmitting, setIsSubmitting, hiddenClaimSignature, setHiddenClaimSignature }
+  const [locallyClaimedConditionIds, setLocallyClaimedConditionIds] = useState<Set<string>>(() => new Set())
+
+  const markLocallyClaimedConditionIds = useCallback((conditionIds: string[]) => {
+    if (conditionIds.length === 0) {
+      return
+    }
+
+    setLocallyClaimedConditionIds((current) => {
+      const next = new Set(current)
+      let changed = false
+      for (const conditionId of conditionIds) {
+        if (!next.has(conditionId)) {
+          next.add(conditionId)
+          changed = true
+        }
+      }
+
+      return changed ? next : current
+    })
+  }, [])
+
+  return {
+    isSubmitting,
+    setIsSubmitting,
+    hiddenClaimSignature,
+    setHiddenClaimSignature,
+    locallyClaimedConditionIds,
+    markLocallyClaimedConditionIds,
+  }
 }
 
 function useMarketsWonShareOnX({
@@ -166,9 +197,16 @@ function useMarketsWonShareOnX({
 
 export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarketsWonCardClientProps) {
   const t = useExtracted()
-  const { summary, markets } = data
-  const { isSubmitting, setIsSubmitting, hiddenClaimSignature, setHiddenClaimSignature } = useMarketsWonClaimState()
-  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
+  const { markets } = data
+  const {
+    isSubmitting,
+    setIsSubmitting,
+    hiddenClaimSignature,
+    setHiddenClaimSignature,
+    locallyClaimedConditionIds,
+    markLocallyClaimedConditionIds,
+  } = useMarketsWonClaimState()
+  const { ensureTradingReady, openTradeRequirements, promptAutoRedeem } = useTradingOnboarding()
   const { signTypedDataAsync } = useSignTypedData()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
   const queryClient = useQueryClient()
@@ -177,21 +215,66 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
   const site = useSiteIdentity()
 
   const siteName = site.name
-  const { previewMarkets, previewExtraCount, claimableSignature, hasClaimableMarkets } = useMarketsWonClaimSignature(markets)
+  const visibleMarkets = useMemo(
+    () => markets.filter(market => !locallyClaimedConditionIds.has(market.conditionId)),
+    [locallyClaimedConditionIds, markets],
+  )
+  const visibleTotalProceeds = useMemo(
+    () => visibleMarkets.reduce((total, market) => total + market.proceeds, 0),
+    [visibleMarkets],
+  )
+  const { previewMarkets, previewExtraCount, claimableSignature, hasClaimableMarkets } = useMarketsWonClaimSignature(visibleMarkets)
   const { isDialogOpen, setIsDialogOpen, handleDialogOpenChange } = useMarketsWonDialogState()
   const { isSharingOnX, handleShareOnX } = useMarketsWonShareOnX({
     siteName,
-    totalProceeds: summary.totalProceeds,
+    totalProceeds: visibleTotalProceeds,
     userUsername: user?.username,
     userDepositWalletAddress: user?.deposit_wallet_address,
   })
+
+  function syncClaimedMarkets(claimedConditionIds: string[]) {
+    if (claimedConditionIds.length === 0) {
+      return
+    }
+
+    markLocallyClaimedConditionIds(claimedConditionIds)
+
+    updateQueryDataWhere<InfiniteData<PublicPosition[]>>(
+      queryClient,
+      ['user-positions'],
+      currentQueryKey => currentQueryKey[2] === 'active',
+      current => current
+        ? {
+            ...current,
+            pages: current.pages.map(page => removeClaimedPublicPositions(page, claimedConditionIds) ?? page),
+          }
+        : current,
+    )
+
+    setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ['user-positions'] })
+      void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
+      void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
+      void queryClient.invalidateQueries({ queryKey: [DEPOSIT_WALLET_BALANCE_QUERY_KEY] })
+      void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
+    }, 4_000)
+    setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ['user-positions'] })
+      void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
+      void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
+      void queryClient.invalidateQueries({ queryKey: [DEPOSIT_WALLET_BALANCE_QUERY_KEY] })
+      void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
+    }, 12_000)
+
+    router.refresh()
+  }
 
   async function handleClaimAll() {
     if (isSubmitting) {
       return
     }
 
-    if (!markets.length) {
+    if (!visibleMarkets.length) {
       toast.info(t('No claimable markets available right now.'))
       return
     }
@@ -205,7 +288,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
       return
     }
 
-    const claimTargets = markets.filter(market => market.indexSets.length > 0)
+    const claimTargets = visibleMarkets.filter(market => market.indexSets.length > 0)
     if (claimTargets.length === 0) {
       toast.info(t('No claimable markets available right now.'))
       return
@@ -226,23 +309,21 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
     setIsSubmitting(true)
 
     try {
-      const calls = claimTargets.map(market =>
-        market.isNegRisk
-          ? buildNegRiskRedeemPositionCall({
-              conditionId: market.conditionId as `0x${string}`,
-              yesAmount: market.yesShares ?? 0,
-              noAmount: market.noShares ?? 0,
-              contract: normalizeAddress(market.negRiskAdapterAddress) as `0x${string}`,
-            })
-          : buildRedeemPositionCall({
-              conditionId: market.conditionId as `0x${string}`,
-              indexSets: market.indexSets,
-            }),
-      )
-
-      const response = await runWithSignaturePrompt(() => signAndSubmitDepositWalletCalls({
+      const response = await runWithSignaturePrompt(() => signAndSubmitDepositWalletCallItemsWithSplitFallback({
         user,
-        calls,
+        items: claimTargets,
+        getCall: market =>
+          market.isNegRisk
+            ? buildNegRiskRedeemPositionCall({
+                conditionId: market.conditionId as `0x${string}`,
+                yesAmount: market.yesShares ?? 0,
+                noAmount: market.noShares ?? 0,
+                contract: normalizeAddress(market.negRiskAdapterAddress) as `0x${string}`,
+              })
+            : buildRedeemPositionCall({
+                conditionId: market.conditionId as `0x${string}`,
+                indexSets: market.indexSets,
+              }),
         metadata: 'redeem_positions',
         signTypedDataAsync,
       }))
@@ -264,41 +345,42 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
           : t('We sent your claim transaction.'),
       })
 
-      const claimedConditionIds = claimTargets.map(market => market.conditionId)
+      const claimedConditionIds = response.successfulItems.map(market => market.conditionId)
+      syncClaimedMarkets(claimedConditionIds)
 
-      setHiddenClaimSignature(claimableSignature)
+      if (response.failedItems.length === 0) {
+        setHiddenClaimSignature(claimableSignature)
+      }
+
+      if (response.partialFailure) {
+        toast.error(t('We could not submit your claim. Please try again.'))
+
+        const failureError = response.failure?.error
+        if (failureError && isTradingAuthRequiredError(failureError)) {
+          setIsDialogOpen(false)
+          openTradeRequirements({ forceTradingAuth: true })
+        }
+        return
+      }
+
       setIsDialogOpen(false)
-
-      updateQueryDataWhere<InfiniteData<PublicPosition[]>>(
-        queryClient,
-        ['user-positions'],
-        currentQueryKey => currentQueryKey[2] === 'active',
-        current => current
-          ? {
-              ...current,
-              pages: current.pages.map(page => removeClaimedPublicPositions(page, claimedConditionIds) ?? page),
-            }
-          : current,
-      )
-
-      setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: ['user-positions'] })
-        void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
-        void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
-        void queryClient.invalidateQueries({ queryKey: [DEPOSIT_WALLET_BALANCE_QUERY_KEY] })
-        void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
-      }, 4_000)
-      setTimeout(() => {
-        void queryClient.invalidateQueries({ queryKey: ['user-positions'] })
-        void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
-        void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
-        void queryClient.invalidateQueries({ queryKey: [DEPOSIT_WALLET_BALANCE_QUERY_KEY] })
-        void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
-      }, 12_000)
-
-      router.refresh()
+      promptAutoRedeem()
     }
     catch (error) {
+      if (error instanceof DepositWalletCallItemsSplitFallbackError) {
+        const claimedConditionIds = (error.successfulItems as PortfolioClaimMarket[]).map(market => market.conditionId)
+        syncClaimedMarkets(claimedConditionIds)
+        if (claimedConditionIds.length > 0) {
+          toast.success(t('Claim submitted'), {
+            description: claimedConditionIds.length > 1
+              ? t('We sent a claim for your winning markets.')
+              : t('We sent your claim transaction.'),
+          })
+          toast.error(t('We could not submit your claim. Please try again.'))
+          return
+        }
+      }
+
       console.error('Failed to submit claim.', error)
       toast.error(t('We could not submit your claim. Please try again.'))
     }
@@ -311,7 +393,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
     && hiddenClaimSignature === claimableSignature
     && claimableSignature.length > 0
 
-  if (shouldHideClaimCard || markets.length === 0) {
+  if (shouldHideClaimCard || visibleMarkets.length === 0) {
     return null
   }
 
@@ -390,7 +472,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
               >
                 <span>{t('You won')}</span>
                 <span className="text-lg leading-none font-semibold text-foreground tabular-nums sm:text-2xl">
-                  {formatCurrency(summary.totalProceeds)}
+                  {formatCurrency(visibleTotalProceeds)}
                 </span>
               </p>
             </div>
@@ -434,7 +516,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
           <p className="inline-flex items-center gap-2 text-foreground dark:text-white">
             <span className="text-xl font-semibold">{t('You won')}</span>
             <span className="text-3xl leading-none font-semibold tabular-nums">
-              {formatCurrency(summary.totalProceeds)}
+              {formatCurrency(visibleTotalProceeds)}
             </span>
           </p>
           <p className="text-sm text-muted-foreground">
@@ -443,7 +525,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
         </div>
 
         <div className="max-h-[min(40vh,12rem)] space-y-2 overflow-y-auto pr-1 text-left">
-          {markets.map((market) => {
+          {visibleMarkets.map((market) => {
             const href = market.eventSlug ? (`/event/${market.eventSlug}` as Route) : null
             const itemClassName = [
               'flex w-full items-center gap-3 rounded-md p-3 transition-colors',
@@ -524,7 +606,7 @@ export default function PortfolioMarketsWonCardClient({ data }: PortfolioMarkets
           <Button className="h-10 flex-1" onClick={handleClaimAll} disabled={isSubmitting || !hasClaimableMarkets}>
             {isSubmitting
               ? t('Submitting...')
-              : `${t('Claim')} ${formatCurrency(summary.totalProceeds)}`}
+              : `${t('Claim')} ${formatCurrency(visibleTotalProceeds)}`}
           </Button>
         </div>
       </DialogContent>

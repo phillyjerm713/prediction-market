@@ -19,7 +19,10 @@ import { isCurrentNegRiskAdapterAddress } from '@/lib/neg-risk-adapter'
 import { isTradingAuthRequiredError } from '@/lib/trading-auth/errors'
 import { cn } from '@/lib/utils'
 import { normalizeAddress } from '@/lib/wallet'
-import { signAndSubmitDepositWalletCalls } from '@/lib/wallet/client'
+import {
+  DepositWalletCallItemsSplitFallbackError,
+  signAndSubmitDepositWalletCallItemsWithSplitFallback,
+} from '@/lib/wallet/client'
 import {
   buildNegRiskRedeemPositionCall,
   buildRedeemPositionCall,
@@ -163,11 +166,9 @@ function useRedeemSelectionState({
     defaultSelectedConditionId,
     defaultSelectedSectionKey,
     open ? 'open' : 'closed',
-    normalizedGroups.map(group => group.conditionId).join(','),
   ].join('|'), [
     defaultSelectedConditionId,
     defaultSelectedSectionKey,
-    normalizedGroups,
     open,
   ])
 
@@ -252,6 +253,31 @@ function useRedeemSelectionState({
     })
   }
 
+  function removeConditionSelection(conditionIds: string[]) {
+    if (conditionIds.length === 0) {
+      return
+    }
+
+    const claimedSet = new Set(conditionIds)
+    setSelectionState((current) => {
+      const baseSelected = current.key === selectionStateKey
+        ? current.selectedConditionIds
+        : initialSelectedConditionIds
+      const baseExpanded = current.key === selectionStateKey
+        ? current.expandedConditionIds
+        : {}
+      const nextSelected = Object.fromEntries(
+        Object.entries(baseSelected).filter(([conditionId]) => !claimedSet.has(conditionId)),
+      ) as Record<string, true>
+
+      return {
+        key: selectionStateKey,
+        selectedConditionIds: nextSelected,
+        expandedConditionIds: baseExpanded,
+      }
+    })
+  }
+
   return {
     normalizedSections,
     normalizedGroups,
@@ -261,15 +287,18 @@ function useRedeemSelectionState({
     selectedAmount,
     toggleConditionSelection,
     toggleConditionExpansion,
+    removeConditionSelection,
   }
 }
 
 function useRedeemClaimSubmission({
   selectedGroups,
+  onPartialClaimSuccess,
   onClaimSuccess,
   onOpenChange,
 }: {
   selectedGroups: SportsRedeemModalGroup[]
+  onPartialClaimSuccess: (conditionIds: string[]) => void
   onClaimSuccess?: (conditionIds: string[]) => void
   onOpenChange: (open: boolean) => void
 }) {
@@ -277,8 +306,39 @@ function useRedeemClaimSubmission({
   const queryClient = useQueryClient()
   const { signTypedDataAsync } = useSignTypedData()
   const { runWithSignaturePrompt } = useSignaturePromptRunner()
-  const { ensureTradingReady, openTradeRequirements } = useTradingOnboarding()
+  const { ensureTradingReady, openTradeRequirements, promptAutoRedeem } = useTradingOnboarding()
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  function syncClaimedConditionIds(claimedConditionIds: Set<string>) {
+    if (claimedConditionIds.size === 0) {
+      return
+    }
+
+    queryClient.setQueriesData({ queryKey: ['order-panel-user-positions'] }, current =>
+      markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
+    queryClient.setQueriesData({ queryKey: ['user-market-positions'] }, current =>
+      markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
+    queryClient.setQueriesData({ queryKey: ['event-user-positions'] }, current =>
+      markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
+    queryClient.setQueriesData({ queryKey: ['user-event-positions'] }, current =>
+      markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
+    queryClient.setQueriesData({ queryKey: ['sports-card-user-positions'] }, current =>
+      markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
+    queryClient.setQueriesData({ queryKey: ['sports-event-user-positions'] }, current =>
+      markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
+
+    void queryClient.invalidateQueries({ queryKey: ['order-panel-user-positions'] })
+    void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
+    void queryClient.invalidateQueries({ queryKey: ['event-user-positions'] })
+    void queryClient.invalidateQueries({ queryKey: ['user-event-positions'] })
+    void queryClient.invalidateQueries({ queryKey: ['sports-card-user-positions'] })
+    void queryClient.invalidateQueries({ queryKey: ['sports-event-user-positions'] })
+    void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
+    void queryClient.invalidateQueries({ queryKey: [DEPOSIT_WALLET_BALANCE_QUERY_KEY] })
+    void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
+
+    onClaimSuccess?.(Array.from(claimedConditionIds))
+  }
 
   async function submitClaim() {
     if (isSubmitting) {
@@ -313,23 +373,21 @@ function useRedeemClaimSubmission({
     setIsSubmitting(true)
 
     try {
-      const calls = selectedGroups.map(group =>
-        group.isNegRisk
-          ? buildNegRiskRedeemPositionCall({
-              conditionId: group.conditionId as `0x${string}`,
-              yesAmount: group.yesShares ?? 0,
-              noAmount: group.noShares ?? 0,
-              contract: normalizeAddress(group.negRiskAdapterAddress) as `0x${string}`,
-            })
-          : buildRedeemPositionCall({
-              conditionId: group.conditionId as `0x${string}`,
-              indexSets: group.indexSets,
-            }),
-      )
-
-      const response = await runWithSignaturePrompt(() => signAndSubmitDepositWalletCalls({
+      const response = await runWithSignaturePrompt(() => signAndSubmitDepositWalletCallItemsWithSplitFallback({
         user,
-        calls,
+        items: selectedGroups,
+        getCall: group =>
+          group.isNegRisk
+            ? buildNegRiskRedeemPositionCall({
+                conditionId: group.conditionId as `0x${string}`,
+                yesAmount: group.yesShares ?? 0,
+                noAmount: group.noShares ?? 0,
+                contract: normalizeAddress(group.negRiskAdapterAddress) as `0x${string}`,
+              })
+            : buildRedeemPositionCall({
+                conditionId: group.conditionId as `0x${string}`,
+                indexSets: group.indexSets,
+              }),
         metadata: 'redeem_positions',
         signTypedDataAsync,
       }))
@@ -344,39 +402,48 @@ function useRedeemClaimSubmission({
       }
 
       toast.success('Claim submitted', {
-        description: selectedGroups.length > 1
+        description: response.successfulItems.length > 1
           ? 'We sent claims for your selected markets.'
           : 'We sent your claim transaction.',
       })
+      if (response.partialFailure) {
+        toast.error('We could not submit your claim. Please try again.')
+      }
 
-      const claimedConditionIds = new Set(selectedGroups.map(group => group.conditionId))
-      queryClient.setQueriesData({ queryKey: ['order-panel-user-positions'] }, current =>
-        markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
-      queryClient.setQueriesData({ queryKey: ['user-market-positions'] }, current =>
-        markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
-      queryClient.setQueriesData({ queryKey: ['event-user-positions'] }, current =>
-        markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
-      queryClient.setQueriesData({ queryKey: ['user-event-positions'] }, current =>
-        markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
-      queryClient.setQueriesData({ queryKey: ['sports-card-user-positions'] }, current =>
-        markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
-      queryClient.setQueriesData({ queryKey: ['sports-event-user-positions'] }, current =>
-        markConditionsAsClaimedInPositions(current as any[] | undefined, claimedConditionIds))
+      const claimedConditionIds = new Set(response.successfulItems.map(group => group.conditionId))
+      syncClaimedConditionIds(claimedConditionIds)
+      if (response.partialFailure) {
+        const failureError = response.failure?.error
+        if (failureError && isTradingAuthRequiredError(failureError)) {
+          onOpenChange(false)
+          openTradeRequirements({ forceTradingAuth: true })
+          return
+        }
 
-      void queryClient.invalidateQueries({ queryKey: ['order-panel-user-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['user-market-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['event-user-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['user-event-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['sports-card-user-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['sports-event-user-positions'] })
-      void queryClient.invalidateQueries({ queryKey: ['user-conditional-shares'] })
-      void queryClient.invalidateQueries({ queryKey: [DEPOSIT_WALLET_BALANCE_QUERY_KEY] })
-      void queryClient.invalidateQueries({ queryKey: ['portfolio-value'] })
+        onPartialClaimSuccess(Array.from(claimedConditionIds))
+        return
+      }
 
-      onClaimSuccess?.(Array.from(claimedConditionIds))
       onOpenChange(false)
+      promptAutoRedeem()
     }
     catch (error) {
+      if (error instanceof DepositWalletCallItemsSplitFallbackError) {
+        const claimedConditionIds = new Set(
+          (error.successfulItems as SportsRedeemModalGroup[]).map(group => group.conditionId),
+        )
+        syncClaimedConditionIds(claimedConditionIds)
+        onPartialClaimSuccess(Array.from(claimedConditionIds))
+        if (claimedConditionIds.size > 0) {
+          toast.success('Claim submitted', {
+            description: claimedConditionIds.size > 1
+              ? 'We sent claims for your selected markets.'
+              : 'We sent your claim transaction.',
+          })
+          toast.error('We could not submit your claim. Please try again.')
+          return
+        }
+      }
       console.error('Failed to submit claim.', error)
       toast.error('We could not submit your claim. Please try again.')
     }
@@ -407,6 +474,7 @@ export default function SportsRedeemModal({
     selectedAmount,
     toggleConditionSelection,
     toggleConditionExpansion,
+    removeConditionSelection,
   } = useRedeemSelectionState({
     sections,
     defaultSelectedConditionId,
@@ -415,6 +483,7 @@ export default function SportsRedeemModal({
   })
   const { isSubmitting, submitClaim } = useRedeemClaimSubmission({
     selectedGroups,
+    onPartialClaimSuccess: removeConditionSelection,
     onClaimSuccess,
     onOpenChange,
   })
